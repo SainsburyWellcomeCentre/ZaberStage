@@ -4,6 +4,9 @@ classdef Stage < handle
 %   stage = zaberstage.Stage('Port', 'COM14')                 axis 1 of the first device
 %   stage = zaberstage.Stage('Port', 'COM14', 'AxisNumber', 3, 'LimitsUm', [20000 40000])
 %   stage = zaberstage.Stage('Transport', zaberstage.transport.SimulatedTransport())
+%   x = zaberstage.Stage('Transport', t, 'AxisNumber', 1, 'SharedTransport', true)
+%   y = zaberstage.Stage('Transport', t, 'AxisNumber', 2, 'SharedTransport', true)
+%                                                         two axes on one port
 %
 %   The constructor never touches the hardware; connect() opens the port, finds the device on
 %   the daisy chain and reads the axis's own limits and whether it is homed. It does not home
@@ -25,16 +28,33 @@ classdef Stage < handle
 %       DeviceAddress  device on the daisy chain, 1-based (default 1)
 %       AxisNumber     axis on that device, 1-based (default 1)
 %       LimitsUm       your [min max]: moves outside are refused. Empty until connect, which
-%                      sets it to DeviceLimitsUm unless you set narrower ones; it must lie
-%                      within DeviceLimitsUm.
+%                      sets it to SafeLimitsUm (or DeviceLimitsUm) unless you set narrower
+%                      ones; it must lie within both.
+%       SafeLimitsUm   the [min max] the axis may never leave, e.g. where it would hit
+%                      something (default [], the whole travel; an end of -Inf or Inf is
+%                      that end of the travel, e.g. [35000 Inf]). Set only while
+%                      Disconnected, so a script cannot widen it: LimitsUm must lie within
+%                      it, and home() is refused when the home end lies outside it (home
+%                      from Zaber Launcher with the path cleared).
 %       Verbose        print each command (default false)
 %       LogCapacity    entries kept by log() (default 1000)
-%   Port, BaudRate, DeviceAddress and AxisNumber can change only while Disconnected.
+%       SharedTransport  the Transport given is shared with other axes: disconnect() (and a
+%                      failed connect()) stop this axis but leave the port open, and whoever
+%                      made the transport closes it (default false: the port is closed)
+%       Reversed       count the axis the other way (default false): positions, moves and
+%                      limits are mirrored across the axis's travel, min + max - the
+%                      controller's position, so they keep its range but increase towards
+%                      home. The controller is not changed (reversing its driver.dir also
+%                      needs its encoder and home sensor reversed); home() still goes to the
+%                      home sensor, which now reads the top of the travel.
+%   Port, BaudRate, DeviceAddress, AxisNumber, Reversed and SafeLimitsUm can change only
+%   while Disconnected.
 %
 %   Methods
 %       connect()                         open, find the device, read limits and homed state
 %       disconnect()                      stop the axis, close. Idempotent, never throws
-%       home('Wait', true)                move to the home sensor (the axis's minimum)
+%       home('Wait', true)                move to the home sensor (the axis's minimum;
+%                                         its maximum when Reversed)
 %       moveAbsolute(um, 'Wait', true)    move to a position
 %       moveRelative(um, 'Wait', true)    move by a distance from the present position
 %       ok = stop()                       decelerate to rest; tried in every state, never throws
@@ -54,9 +74,14 @@ classdef Stage < handle
 %       zaberstage:Stage:noDevice            no device at DeviceAddress, or no such axis
 %       zaberstage:Stage:outsideLimits       a target outside LimitsUm (nothing is sent)
 %       zaberstage:Stage:badValue            a position that is not one finite number
-%       zaberstage:Stage:limitsOutsideDevice LimitsUm beyond the axis's own travel
-%       zaberstage:Stage:portLocked          Port, BaudRate, DeviceAddress or AxisNumber
-%                                            changed while connected
+%       zaberstage:Stage:limitsOutsideDevice LimitsUm beyond the axis's own travel, or
+%                                            SafeLimitsUm leaving none of it
+%       zaberstage:Stage:limitsOutsideSafe   LimitsUm beyond SafeLimitsUm
+%       zaberstage:Stage:homeOutsideSafe     home() when the home end is outside
+%                                            SafeLimitsUm (nothing is sent)
+%       zaberstage:Stage:portLocked          Port, BaudRate, DeviceAddress, AxisNumber or
+%                                            Reversed or SafeLimitsUm changed while
+%                                            connected
 %       Transport and library errors (an unhomed axis, a pulled cable) pass through with
 %       their own identifiers, after being logged.
 %
@@ -87,11 +112,14 @@ classdef Stage < handle
         DeviceAddress  % device on the daisy chain, 1-based
         AxisNumber     % axis on that device, 1-based
         LimitsUm       % your [min max], um
+        Reversed       % count the axis the other way
+        SafeLimitsUm   % [min max] the axis may never leave, um ([] = the whole travel)
     end
 
     properties
         Verbose = false      % print commands
         LogCapacity = 1000   % entries kept by log()
+        SharedTransport = false  % leave the Transport open on disconnect (other axes use it)
     end
 
     events
@@ -105,6 +133,8 @@ classdef Stage < handle
         DeviceValue = 1
         AxisValue = 1
         LimitsValue = []
+        ReversedValue = false
+        SafeValue = []
         OwnsTransport = false
         LogEntries
         ClockStart
@@ -123,7 +153,7 @@ classdef Stage < handle
             obj.PortValue = cfg.Port;
             obj.BaudRateValue = cfg.BaudRate;
             names = {'Port', 'BaudRate', 'DeviceAddress', 'AxisNumber', 'LimitsUm', ...
-                'Verbose', 'LogCapacity'};
+                'Verbose', 'LogCapacity', 'SharedTransport', 'Reversed', 'SafeLimitsUm'};
             for k = 1:2:numel(varargin)
                 name = char(varargin{k});
                 value = varargin{k + 1};
@@ -182,13 +212,21 @@ classdef Stage < handle
                     'DeviceAddress', obj.DeviceValue);
                 obj.DeviceLimitsUm = info.LimitsUm;
                 obj.IsHomed = info.IsHomed;
+                bounds = obj.bounds();
+                if bounds(1) >= bounds(2)
+                    error('zaberstage:Stage:limitsOutsideDevice', ['SafeLimitsUm [%g %g] ' ...
+                        'leave nothing of the axis''s travel [%g %g] um.'], obj.SafeValue(1), ...
+                        obj.SafeValue(2), obj.DeviceLimitsUm(1), obj.DeviceLimitsUm(2));
+                end
                 if isempty(obj.LimitsValue)
-                    obj.LimitsValue = info.LimitsUm;
+                    obj.LimitsValue = obj.bounds();
                 else
-                    obj.requireWithinDevice(obj.LimitsValue);
+                    obj.requireWithinBounds(obj.LimitsValue);
                 end
             catch err
-                obj.Transport.close();
+                if ~obj.SharedTransport
+                    obj.Transport.close();
+                end
                 obj.DeviceLimitsUm = [];
                 rethrow(err);
             end
@@ -204,10 +242,12 @@ classdef Stage < handle
             if wasConnected
                 obj.stop();
             end
-            try
-                obj.Transport.close();
-            catch
-                % Nothing more can be done for a port that will not close.
+            if ~obj.SharedTransport
+                try
+                    obj.Transport.close();
+                catch
+                    % Nothing more can be done for a port that will not close.
+                end
             end
             if wasConnected
                 obj.setState('Disconnected');
@@ -219,10 +259,17 @@ classdef Stage < handle
         function home(obj, varargin)
             % home('Wait', true) moves the axis to its home sensor and zeroes it there.
             %
-            %   Homing travels to the axis's minimum whatever LimitsUm says: clear the path
-            %   first.
+            %   Homing travels to the axis's minimum (its maximum when Reversed) whatever
+            %   LimitsUm says: clear the path first. Refused when that end lies outside
+            %   SafeLimitsUm.
             wait = parseWait(varargin);
             obj.requireReady();
+            homeUm = obj.mirror(obj.DeviceLimitsUm(1));
+            if ~isempty(obj.SafeValue) && (homeUm < obj.SafeValue(1) || homeUm > obj.SafeValue(2))
+                error('zaberstage:Stage:homeOutsideSafe', ['home() refused: homing runs to ' ...
+                    '%g um, outside SafeLimitsUm [%g %g]. Clear the path and home from Zaber ' ...
+                    'Launcher.'], homeUm, obj.SafeValue(1), obj.SafeValue(2));
+            end
             obj.call('home', @() obj.Transport.home(obj.DeviceValue, obj.AxisValue, wait));
             obj.IsHomed = true;
             notify(obj, 'MoveCompleted');
@@ -235,7 +282,7 @@ classdef Stage < handle
             obj.requireReady();
             obj.requireWithinLimits(um);
             obj.call('moveAbsolute', @() obj.Transport.moveAbsolute(obj.DeviceValue, ...
-                obj.AxisValue, um, wait), um);
+                obj.AxisValue, obj.mirror(um), wait), um);
             notify(obj, 'MoveCompleted');
         end
 
@@ -249,7 +296,7 @@ classdef Stage < handle
             obj.requireReady();
             obj.requireWithinLimits(obj.positionUm() + um);
             obj.call('moveRelative', @() obj.Transport.moveRelative(obj.DeviceValue, ...
-                obj.AxisValue, um, wait), um);
+                obj.AxisValue, obj.direction() * um, wait), um);
             notify(obj, 'MoveCompleted');
         end
 
@@ -271,8 +318,8 @@ classdef Stage < handle
         function um = positionUm(obj)
             % um = positionUm() is the axis position now.
             obj.requireReady();
-            um = obj.call('positionUm', @() obj.Transport.positionUm(obj.DeviceValue, ...
-                obj.AxisValue));
+            um = obj.mirror(obj.call('positionUm', @() obj.Transport.positionUm( ...
+                obj.DeviceValue, obj.AxisValue)));
         end
 
         function tf = isMoving(obj)
@@ -308,7 +355,9 @@ classdef Stage < handle
             s.AxisNumber = obj.AxisValue;
             s.DeviceLimitsUm = obj.DeviceLimitsUm;
             s.LimitsUm = obj.LimitsValue;
+            s.SafeLimitsUm = obj.SafeValue;
             s.IsHomed = obj.IsHomed;
+            s.Reversed = obj.ReversedValue;
             entries = obj.LogEntries;
             times = obj.ClockEpoch + seconds([entries.Time]);
             times.Format = 'yyyy-MM-dd''T''HH:mm:ss.SSS';
@@ -363,6 +412,19 @@ classdef Stage < handle
             obj.AxisValue = value;
         end
 
+        function value = get.Reversed(obj)
+            value = obj.ReversedValue;
+        end
+
+        function set.Reversed(obj, value)
+            obj.requireUnlocked('Reversed');
+            if ~isscalar(value) || ~(islogical(value) || isnumeric(value)) ...
+                    || ~any(value == [0 1])
+                error('zaberstage:Stage:badValue', 'Reversed must be true or false.');
+            end
+            obj.ReversedValue = logical(value);
+        end
+
         function value = get.LimitsUm(obj)
             value = obj.LimitsValue;
         end
@@ -374,10 +436,31 @@ classdef Stage < handle
                     'LimitsUm must be [min max] with min < max (um).');
             end
             value = double(value(:)');
-            if ~isempty(obj.DeviceLimitsUm)
-                obj.requireWithinDevice(value);
-            end
+            obj.requireWithinBounds(value);
             obj.LimitsValue = value;
+        end
+
+        function value = get.SafeLimitsUm(obj)
+            value = obj.SafeValue;
+        end
+
+        function set.SafeLimitsUm(obj, value)
+            obj.requireUnlocked('SafeLimitsUm');
+            if ~isempty(value)
+                if ~isnumeric(value) || numel(value) ~= 2 || any(isnan(value)) ...
+                        || value(1) >= value(2) || value(1) == Inf || value(2) == -Inf
+                    error('zaberstage:Stage:badValue', ['SafeLimitsUm must be [] or [min max] ' ...
+                        'with min < max (um; -Inf or Inf for that end of the travel).']);
+                end
+                value = double(value(:)');
+                limits = obj.LimitsValue;
+                if ~isempty(limits) && (limits(1) < value(1) || limits(2) > value(2))
+                    obj.LimitsValue = [];   % connect sets them to the new safe range
+                end
+            else
+                value = [];
+            end
+            obj.SafeValue = value;
         end
     end
 
@@ -415,6 +498,18 @@ classdef Stage < handle
             end
         end
 
+        function um = mirror(obj, um)
+            % The position on the other side of the travel when Reversed (both ways).
+            if obj.ReversedValue
+                um = sum(obj.DeviceLimitsUm) - um;
+            end
+        end
+
+        function s = direction(obj)
+            % -1 when Reversed: a step's direction on the controller.
+            s = 1 - 2 * obj.ReversedValue;
+        end
+
         function requireWithinLimits(obj, um)
             % Errors unless um lies within LimitsUm.
             if um < obj.LimitsValue(1) || um > obj.LimitsValue(2)
@@ -424,10 +519,30 @@ classdef Stage < handle
             end
         end
 
+        function value = bounds(obj)
+            % The widest LimitsUm may be: the travel, within SafeLimitsUm if set.
+            value = obj.DeviceLimitsUm;
+            if ~isempty(obj.SafeValue)
+                value = [max(value(1), obj.SafeValue(1)), min(value(2), obj.SafeValue(2))];
+            end
+        end
+
+        function requireWithinBounds(obj, limits)
+            % Errors unless limits lie within the travel (once known) and SafeLimitsUm.
+            if ~isempty(obj.DeviceLimitsUm)
+                obj.requireWithinDevice(limits);
+            end
+            safe = obj.SafeValue;
+            if ~isempty(safe) && (limits(1) < safe(1) || limits(2) > safe(2))
+                error('zaberstage:Stage:limitsOutsideSafe', ['LimitsUm [%g %g] reach beyond ' ...
+                    'SafeLimitsUm [%g %g] um.'], limits(1), limits(2), safe(1), safe(2));
+            end
+        end
+
         function requireWithinDevice(obj, limits)
             % Errors unless limits lie within the axis's own travel.
             if limits(1) < obj.DeviceLimitsUm(1) || limits(2) > obj.DeviceLimitsUm(2)
-                error('zaberstage:Stage:limitsOutsideDevice', ['LimitsUm [%g %g] reach ' ...
+                error('zaberstage:Stage:limitsOutsideDevice', ['Limits [%g %g] reach ' ...
                     'beyond the axis''s travel [%g %g] um.'], limits(1), limits(2), ...
                     obj.DeviceLimitsUm(1), obj.DeviceLimitsUm(2));
             end

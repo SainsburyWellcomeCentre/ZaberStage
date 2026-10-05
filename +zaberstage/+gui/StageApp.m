@@ -142,7 +142,8 @@ classdef StageApp < handle
                 c.Identity.Text = sprintf(['%s %s  S/N %d  axis %d  travel %.0f-%.0f um  ' ...
                     '%s'], stage.Identity.DeviceName, stage.Identity.PeripheralName, ...
                     stage.Identity.SerialNumber, stage.AxisNumber, stage.DeviceLimitsUm, ...
-                    pick(stage.IsHomed, 'homed', 'NOT HOMED'));
+                    [pick(stage.IsHomed, 'homed', 'NOT HOMED'), pick(stage.Reversed, ...
+                    '  reversed', ''), safeText(stage.SafeLimitsUm)]);
                 c.Min.Value = stage.LimitsUm(1);
                 c.Max.Value = stage.LimitsUm(2);
             else
@@ -389,6 +390,14 @@ function setLimits(stage, limits)
 stage.LimitsUm = limits;
 end
 
+
+function text = safeText(limits)
+% '  safe min-max um', or '' when the stage has no SafeLimitsUm.
+    text = '';
+    if ~isempty(limits)
+        text = sprintf('  safe %.0f-%.0f um', limits);
+    end
+end
 
 function value = pick(condition, a, b)
 % a when condition is true, else b.

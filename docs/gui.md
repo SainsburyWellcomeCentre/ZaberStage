@@ -10,7 +10,7 @@ zaberstage.app(..., 'Visible', false, 'AutoRefresh', false)
 | Area | Controls |
 |---|---|
 | Connection | Port, Scan, Connect/Disconnect, state |
-| Identity | device, axis name, serial, axis number, travel, homed or NOT HOMED |
+| Identity | device, axis name, serial, axis number, travel, homed or NOT HOMED, reversed when the stage is `Reversed`, its `SafeLimitsUm` |
 | Position | the position (every `RefreshS`, 0.5 s, with Auto refresh), Read, Home, Go to with Go, Step with - Step and + Step |
 | Your limits | Min and Max: set `LimitsUm` at once (no traffic) |
 | Log | commands that move or change something, then the window's errors |

@@ -13,7 +13,9 @@ and the library calls are in [`zaber-motion.md`](zaber-motion.md).
 
 **Non-goals**
 - Several axes moving together, streams, PVT, triggers, joystick setup. Use the Zaber Motion
-  Library directly for those. A second axis is a second `Stage` object.
+  Library directly for those. A second axis is a second `Stage` object; axes on one port share
+  one transport, each `Stage` made with `'Transport', t, 'SharedTransport', true`, and the
+  caller closes `t` (a port can be opened only once).
 - Focus finding or scans. Those belong to the client (`example_scan.m` shows the pattern).
 
 ## 2. Decisions
@@ -46,6 +48,11 @@ homed. Homing runs the axis to its end of travel, so it is always an explicit `h
   moves against the position read now plus the step. A move outside is refused
   (`outsideLimits`), never shortened.
 - `home()` is the one move the limits cannot govern.
+- `SafeLimitsUm` is the box the axis may never leave, where it would hit something. It is set
+  before `connect` and locked while connected, so a script that narrows `LimitsUm` to its scan
+  cannot widen it by mistake: `LimitsUm` defaults to it and is refused outside it
+  (`limitsOutsideSafe`). Since homing cannot be limited, `home()` is refused
+  (`homeOutsideSafe`) when the home end lies outside it.
 
 ### D5. Stop on every software exit
 
@@ -63,6 +70,16 @@ documentation still applies. The object stays Ready, because the controller answ
 The window is built the same way as OBISLaser's and DoricLED's. Every button goes through
 `Stage`, so the limits apply to clicks too. Esc is STOP. The position readback timer is safe
 during scripted moves (D1: the library matches replies).
+
+### D8. A reversed axis is mirrored in software, not on the controller
+
+`'Reversed', true` makes positions increase the other way. `Stage` mirrors every position
+across the axis's travel (`min + max -` the controller's position) and turns relative steps
+round, so `DeviceLimitsUm`, `LimitsUm` and the GUI keep the same range. The controller is not
+touched: flipping its `driver.dir` alone reverses the motor but not its encoder or home sensor,
+and the axis then runs off to one end. `home()` still goes to the home sensor, which then
+reads the top of the travel. The log and `record()` hold the reversed values, and
+`record().Reversed` says so.
 
 ## 3. Class overview
 

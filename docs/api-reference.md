@@ -18,8 +18,11 @@ The constructor never touches the hardware.
 | `DeviceLimitsUm` | read | the axis's own travel |
 | `IsHomed` | read | homed when last checked |
 | `Port`, `BaudRate`, `DeviceAddress`, `AxisNumber` | read/write | only while Disconnected |
-| `LimitsUm` | read/write | your `[min max]`; must lie within `DeviceLimitsUm` |
+| `LimitsUm` | read/write | your `[min max]`; must lie within `DeviceLimitsUm` and `SafeLimitsUm` |
 | `Verbose`, `LogCapacity` | read/write | printing; log length (1000) |
+| `SafeLimitsUm` | read/write | the `[min max]` the axis may never leave (default `[]`, the whole travel; `-Inf`/`Inf` is that end of the travel, e.g. `[35000 Inf]`); only while Disconnected, so a script cannot widen it. `LimitsUm` defaults to it and must lie within it; `home()` is refused when the home end is outside it |
+| `Reversed` | read/write | `true`: positions, moves and limits count the other way, mirrored across the travel (min + max − the controller's position), so home reads the top of the travel; the controller is not changed (default `false`; only while Disconnected) |
+| `SharedTransport` | read/write | `true`: the `Transport` given is shared with other axes, so `disconnect()` and a failed `connect()` stop this axis but leave the port open; whoever made the transport closes it (default `false`) |
 
 | Method | Does |
 |---|---|
@@ -38,7 +41,7 @@ The constructor never touches the hardware.
 Events: `StateChanged`, `MoveCompleted`.
 
 Errors (`zaberstage:Stage:*`): `notReady`, `noPort`, `noDevice`, `outsideLimits`, `badValue`,
-`limitsOutsideDevice`, `portLocked`, `invalidOption`. Library and transport errors pass through
+`limitsOutsideDevice`, `limitsOutsideSafe`, `homeOutsideSafe`, `portLocked`, `invalidOption`. Library and transport errors pass through
 with their own identifiers.
 
 ## Transports
