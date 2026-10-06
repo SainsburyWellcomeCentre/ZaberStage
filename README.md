@@ -19,8 +19,10 @@ standalone, in calibration scripts, or inside Bpod protocols.
 - **Safe by default:** connecting never moves anything; homing is always an explicit call; the
   axis is stopped when you disconnect, delete the object or close the window; `stop()` works in
   every state.
-- **A control window:** position readback, jog by a step, go to a position, Home, your limits,
-  and a large **STOP** button (Esc does the same).
+- **A control panel for every axis:** X, Y, Z in one panel, each with its position, jog by a
+  step, go to, Home; a large **STOP** for all of them (Esc does the same); Connect finds the
+  controller; limits and the log fold away under Details. It opens as a window of its own or
+  inside another program's window.
 - **A simulated stage:** it refuses moves until homed, takes real time per move if you give it a
   speed, and can be told to fail or lose its cable.
 - **A session record:** every command, with its time and duration, as a plain struct.
@@ -78,8 +80,9 @@ Both run on the simulated stage; set `useHardware = true` for the real one.
 ## Control window
 
 ```matlab
-zaberstage.app()            % owns its own stage connection
-zaberstage.app(stage)       % controls a stage you already connected (leaves it connected)
+zaberstage.app()            % finds the controller and shows every axis on it
+zaberstage.app('Axes', axes)  % named axes with their safe ranges (docs/gui.md)
+zaberstage.app(stages)      % controls stages you already connected (leaves them connected)
 ```
 
 See [docs/gui.md](docs/gui.md).

@@ -25,12 +25,12 @@ the Zaber Motion Library (ASCII protocol). It must work **standalone** (scripts 
 | Milestone | State |
 |---|---|
 | M1: `Stage`, transports, simulated stage, tests | **Done** (2026-10-05). Moved out of `LuminoseHF` (`zaber/ZaberModel.m`) |
-| M2: GUI (`zaberstage.app`) | **Done** on the simulated stage; no human pass yet |
+| M2: GUI (`zaberstage.app`) | **Done** on the simulated stage; one panel for every axis, laid out like the OBIS and camera panels, Connect that finds the controller, embeddable (2026-10-06); no human pass yet |
 | M3: examples, docs, README | **Done** |
 | M4: `LuminoseHF` uses the package | **Done** (2026-10-05): `calibrate_z.m` |
 | M5: rig verification | Pending (`docs/rig-checks.md`) |
 
-The suite has 47 tests, all passing headless on R2025b in about 5 s, and the Code Analyzer reports
+The suite has 63 tests, all passing headless on R2025b in about 5 s, and the Code Analyzer reports
 zero messages.
 
 ## Environment
@@ -41,7 +41,7 @@ zero messages.
 | Same path from Windows | `C:\Users\harrislab\MATLAB\ZaberStage` |
 | MATLAB | R2025b (`/mnt/c/Program Files/MATLAB/R2025b/bin/matlab.exe`) |
 | Zaber Motion Library | add-on 9.3.2, `%APPDATA%\MathWorks\MATLAB Add-Ons\Toolboxes\Zaber Motion Library` (read-only) |
-| Stage on Windows | `COM14`, axis 1 on this rig (`LuminoseHF/luminose_config.yaml`, `zaber:`) |
+| Stage on Windows | `COM14` ("USB Serial Device", USB vendor 2939), X, Y, Z as axes 1, 2, 3 of device 1 (`LuminoseHF/luminose_config.yaml`, `zaber:`) |
 | Sibling packages (idioms, read-only) | `../OBISLaser` (closest), `../DoricLED`, `../SpinCam`, `../LuminoseFM` |
 
 ```bash
@@ -89,6 +89,10 @@ real terminal.
 ## Architecture in brief
 
 - `zaberstage.Stage` holds one axis: the address, the limits, the state, the log and the record.
+- `zaberstage.gui.StageApp` is the panel for every axis of a controller (one `Stage` each on a
+  shared transport), a window of its own or inside a client's GUI (`'Parent'`). Without `'Axes'`
+  it uses the PC's default axes (`zaberstage.config().Axes`, a preference that `LuminoseHF`
+  keeps equal to its `zaber.axes`), so the safe ranges hold in the panel opened on its own.
 - Transports do what they are told on any device and axis (D2):
   - `MotionLibraryTransport` wraps `zaber.motion.ascii.Connection` and `Axis`.
   - `SimulatedTransport` keeps positions and homed state, refuses like the controller, and
@@ -120,10 +124,12 @@ real terminal.
 
 ## Tests
 
-- The current suite has 47 tests:
+- The current suite has 63 tests:
   - `StageTest` (21)
   - `SimulatedTransportTest` (8)
-  - `GuiTest` (8)
+  - `GuiTest` (24, a simulated three-axis controller and a made-up port list; every panel a
+    test owns passes `'Axes'`, except the one that checks the default, which puts the PC's
+    `Axes` preference back)
   - `MotionLibraryTransportTest` (3; two are skipped without the library)
   - `ExamplesTest` (2)
   - `HelpTextTest` (5)

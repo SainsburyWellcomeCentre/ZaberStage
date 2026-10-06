@@ -68,7 +68,8 @@ The concrete transports are:
 
 | Function | Does |
 |---|---|
-| `zaberstage.app(...)` | the control window ([`gui.md`](gui.md)) |
+| `zaberstage.app(...)` | the control panel for every axis of a controller ([`gui.md`](gui.md)); with no `'Axes'` it uses `zaberstage.config().Axes` |
+| `zaberstage.config(...)` | `RootDir`, `Port`, `BaudRate`, `Axes` (default axes: a struct of structs of `Stage` options, `struct()` when none), `Version`; preferences `setpref('zaberstage', ...)` |
 | `zaberstage.config(...)` | `RootDir`, `Port`, `BaudRate`, `Version`; `setpref('zaberstage', ...)` |
-| `zaberstage.listDevices('Probe', false)` | table `Port`, `Available`, `Devices` |
+| `zaberstage.listDevices('Probe', false)` | table `Port`, `Available`, `IsZaber` (a Zaber USB controller, USB vendor 2939, from the Windows registry: no traffic), `Description`, `Devices` (only when probed) |
 | `zaberstage.version()` | package version |

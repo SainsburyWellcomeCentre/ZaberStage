@@ -65,11 +65,19 @@ An unhomed axis, a stall or a pulled cable raises the library's own exception. `
 command with the message and rethrows. It does not translate the exception, so the library's
 documentation still applies. The object stays Ready, because the controller answered.
 
-### D7. The GUI is a programmatic uifigure
+### D7. The GUI is a programmatic uifigure: one panel for every axis
 
 The window is built the same way as OBISLaser's and DoricLED's. Every button goes through
 `Stage`, so the limits apply to clicks too. Esc is STOP. The position readback timer is safe
 during scripted moves (D1: the library matches replies).
+
+Since 2026-10-06 (operator's request) the panel shows every axis of a controller, one row each
+(the rig's X, Y and Z share one port), laid out like the OBIS laser and Hamamatsu camera panels:
+STOP stops them all, Connect finds the Zaber port from Windows' device list (USB vendor 2939)
+and detects the axes, moves return at once so STOP always answers, and the port, the limits and
+the log fold under Details. `Stage` stays one axis: the panel makes one per axis on a shared
+transport, or attaches to a client's (`LuminoseHF`'s `rigStages`). With `'Parent'` it is built
+inside the client's GUI, which hosts it rather than making stage controls of its own.
 
 ### D8. A reversed axis is mirrored in software, not on the controller
 
@@ -117,5 +125,6 @@ docs/
 | Version | Date | What |
 |---|---|---|
 | 0.1.0 | 2026-10-05 | M1–M4: package, simulated stage, GUI, examples, docs, 47 tests; `LuminoseHF`'s `calibrate_z.m` uses it. Moved out of `LuminoseHF` (`zaber/ZaberModel.m`) |
+| 0.2.0 | 2026-10-06 | The panel for every axis (D7), embeddable; `listDevices` `IsZaber` from the registry; 62 tests |
 
 Next is **M5**, rig verification (`rig-checks.md`).
